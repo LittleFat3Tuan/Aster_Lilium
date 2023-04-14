@@ -1,0 +1,266 @@
+---
+title: "Preliminary Analysis on Lilium data"
+author: "Gan Yao"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# 1. Some notes
+
+This is just a preliminary analysis of Lilium data. Plenty of model design choices are still left to discuss.
+
+#### Data inconsistency \
+ \
+There are five individuals in dataset with `flCt == 0` but `flNotConsumed == 1`.
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data.csv")
+data[data$flCt == 0,c('id','flCt','flNotConsumed')]
+```
+
+Though the data may be correct as it reflects the scientific truth, it is not allowed in aster graph. So during the data cleaning section below, these individuals' `flNotConsumed` values are manually changed to zero.
+
+#### Problem with `nn[k]DistNotConsumed` \
+ \
+Columns `nn[k]DistNotConsumed` are missing for individuals not harvested, and it makes no sense to replace these NAs with any numeric values. So these columns are ignored in this analysis since NAs are not allowed to appear in design matrix.
+
+#### Missing 'fecundity' \
+ \
+The last node of previously proposed aster graph is 'fecundity'. However, it's missing in the dataset and hence is ignored in this analysis.
+
+#### Additional node accounting for sub-sampling. \
+ \
+In order to exploit the entire data set(i.e. not just the harvested ones), a new node `isHarvested` is added to the aster graph.
+
+`isHarvested` is a Bernoulli node placed between `capsuleCt` and `ovuleCt`, and takes values from column `nCapsulesHarvested`. It indicates whether a capsule is harvested or not.
+
+So, considering all above modifications, the aster graph upon which this analysis is based should be
+$$root \rightarrow flNotConsumed \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow SeedSet$$
+
+# 2. Load and clean data
+
+Import libraries,
+
+```{r}
+library(aster)
+library(tidyverse)
+```
+
+Load Data,
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data.csv")
+names(data)
+```
+
+Look at `site` column,
+
+```{r}
+data %>% count(site)
+```
+
+We should remove rows with site value `lf` and `wrrx`, since they're too rare in this data set.
+
+```{r}
+data <- data[data$site != "lf",]
+data <- data[data$site != "wrrx",]
+data %>% count(site)
+```
+
+Now we handle the inconsistency between `flCt` and `flNotConsumed`,
+
+```{r}
+data %>% count(flNotConsumed)
+```
+
+by manually changing the `flNotConsumed` values of these rows to zero.
+
+```{r}
+data <- data %>% mutate(flNotConsumed = replace(flNotConsumed, flCt==0&flNotConsumed==1, 0))
+data %>% count(flNotConsumed)
+```
+
+To add node `isHarvested`, all the NAs in column `nCapsulesHarvested` should be assigned to zeros.
+
+```{r}
+sum(as.numeric(is.na(data$nCapsulesHarvested)))
+```
+
+```{r}
+data[is.na(data$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+sum(as.numeric(is.na(data$nCapsulesHarvested)))
+sum(as.numeric(data$nCapsulesHarvested==0))
+```
+
+Same for columns `ovuleCt` and `embryoCt`.
+
+```{r}
+sum(as.numeric(is.na(data$ovuleCt)))
+sum(as.numeric(is.na(data$embryoCt)))
+data[is.na(data$ovuleCt), 'ovuleCt'] <- 0
+data[is.na(data$embryoCt), 'embryoCt'] <- 0
+sum(as.numeric(is.na(data$ovuleCt)))
+sum(as.numeric(is.na(data$embryoCt)))
+sum(as.numeric(data$ovuleCt==0))
+sum(as.numeric(data$embryoCt==0))
+```
+
+
+# 3. Wide format to long format
+
+To fit aster model with this dataset, we need to first transform it to so-called 'long format'.
+
+```{r}
+data <- data %>% select("id", "site", "flCt", "flNotConsumed",
+                               "capsuleCt", "nCapsulesHarvested",
+                              "ovuleCt", "embryoCt","nn1Dist","nn2Dist",
+                               "nn3Dist", "nn4Dist","nn5Dist",
+                               "nn6Dist", "nn7Dist", "nn8Dist",
+                               "nn9Dist", "nn10Dist")
+names(data)[names(data) == 'nCapsulesHarvested'] <- 'isHarvested'
+vars <- c("flCt", "flNotConsumed", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+redata <- reshape(data, varying = list(vars), direction="long",
+                  timevar="varb", times = as.factor(vars),
+                  v.names="resp")
+redata <- data.frame(redata, root = 1)
+names(redata)
+```
+
+Last step of preparing data, is to add one column that indicates the best surrogate of fitness in data, in this case, the `embryoCt` level of `varb`.
+
+```{r}
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+names(redata)
+```
+
+# 4. Fixed effects aster model
+
+Let's first fit a big model. 
+
+```{r}
+pred <- c(0,1,2,3,4,5)
+fam <- c(2,1,2,1,2,1)
+model1 <- aster(resp ~ varb + fit:(site + nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                   + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                pred, fam,varb,id,root,data=redata)
+#summary(model1)
+```
+
+Directly using `nn[k]Dist` will cause the Fisher information matrix to be nearly singular, which is why `info.tol` need to be set to 1e-13. This may be a sign of true direction of recession. So we can try to transform the values.
+
+First try natural log.
+
+```{r}
+redata[c("lognn1Dist", "lognn2Dist", "lognn3Dist",
+         "lognn4Dist",  "lognn5Dist", "lognn6Dist",
+         "lognn7Dist", "lognn8Dist", "lognn9Dist",
+         "lognn10Dist")]                        <- log(redata[, c("nn1Dist", "nn2Dist",
+                                                                  "nn3Dist", "nn4Dist",
+                                                                  "nn5Dist", "nn6Dist", 
+                                                                  "nn7Dist", "nn8Dist",
+                                                                  "nn9Dist", "nn10Dist")])
+
+model2 <- aster(resp ~ varb + fit:(site + lognn1Dist + lognn2Dist + lognn3Dist + lognn4Dist 
+                                   + lognn5Dist  + lognn6Dist + lognn7Dist + lognn8Dist + 
+                                     lognn9Dist + lognn10Dist), 
+                pred, fam,varb,id,root,data=redata)
+summary(model2, info.tol = 1e-10)
+```
+
+Then try centering.
+
+```{r}
+redata[c("Cnn1Dist", "Cnn2Dist", "Cnn3Dist", 
+         "Cnn4Dist", "Cnn5Dist", "Cnn6Dist", 
+         "Cnn7Dist", "Cnn8Dist", "Cnn9Dist", 
+         "Cnn10Dist")]                      <- redata[, c("nn1Dist", "nn2Dist","nn3Dist", 
+                                                          "nn4Dist","nn5Dist", "nn6Dist",
+                                                          "nn7Dist", "nn8Dist","nn9Dist", 
+                                                          "nn10Dist")]
+
+redata <- redata %>% mutate_at(c("Cnn1Dist", "Cnn2Dist",
+                                 "Cnn3Dist", "Cnn4Dist",
+                                 "Cnn5Dist", "Cnn6Dist",
+                                 "Cnn7Dist", "Cnn8Dist",
+                                 "Cnn9Dist", "Cnn10Dist"), scale, scale=FALSE)
+
+model3 <- aster(resp ~ varb + fit*(site + Cnn1Dist + Cnn2Dist + Cnn3Dist + Cnn4Dist 
+                                   + Cnn5Dist  + Cnn6Dist + Cnn7Dist + Cnn8Dist + 
+                                     Cnn9Dist + Cnn10Dist), 
+                pred, fam,varb,id,root,data=redata)
+summary(model3, info.tol = 1e-12)
+```
+
+Standardization.
+
+```{r}
+redata[c("Sdnn1Dist", "Sdnn2Dist", "Sdnn3Dist", 
+         "Sdnn4Dist", "Sdnn5Dist", "Sdnn6Dist", 
+         "Sdnn7Dist", "Sdnn8Dist", "Sdnn9Dist", 
+         "Sdnn10Dist")]                      <- redata[, c("nn1Dist", "nn2Dist","nn3Dist", 
+                                                          "nn4Dist","nn5Dist", "nn6Dist",
+                                                          "nn7Dist", "nn8Dist","nn9Dist", 
+                                                          "nn10Dist")]
+
+redata <- redata %>% mutate_at(c("Sdnn1Dist", "Sdnn2Dist",
+                                 "Sdnn3Dist", "Sdnn4Dist",
+                                 "Sdnn5Dist", "Sdnn6Dist",
+                                 "Sdnn7Dist", "Sdnn8Dist",
+                                 "Sdnn9Dist", "Sdnn10Dist"), scale, scale=TRUE)
+
+model4 <- aster(resp ~ varb + fit*(site + Sdnn1Dist + Sdnn2Dist + Sdnn3Dist + Sdnn4Dist 
+                                   + Sdnn5Dist  + Sdnn6Dist + Sdnn7Dist + Sdnn8Dist + 
+                                     Sdnn9Dist + Sdnn10Dist), 
+                pred, fam,varb,id,root,data=redata)
+summary(model4,  info.tol = 1e-10)
+```
+
+# 5. Random effects aster model
+
+```{r}
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+remodel1 <- reaster(resp ~ varb + fit:(nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                   + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                  list(site = ~0 + fit:site),
+                pred, fam,varb,Nid,root,data=redata)
+summary(remodel1)
+```
+
+```{r}
+remodel2 <- reaster(resp ~ varb + fit:(lognn1Dist + lognn2Dist + lognn3Dist + lognn4Dist 
+                                   + lognn5Dist  + lognn6Dist + lognn7Dist + lognn8Dist + 
+                                     lognn9Dist + lognn10Dist), 
+                list(site = ~0 + fit:site),
+                pred, fam,varb,Nid,root,data=redata)
+summary(remodel2)
+```
+
+
+
+```{r}
+remodel3 <- reaster(resp ~ varb + fit:(Cnn1Dist + Cnn2Dist + Cnn3Dist + Cnn4Dist 
+                                   + Cnn5Dist  + Cnn6Dist + Cnn7Dist + Cnn8Dist + 
+                                     Cnn9Dist + Cnn10Dist), 
+                list(site = ~0 + fit:site),
+                pred, fam,varb,Nid,root,data=redata)
+summary(remodel3)
+```
+
+
+```{r}
+remodel4 <- reaster(resp ~ varb + fit:(Sdnn1Dist + Sdnn2Dist + Sdnn3Dist + Sdnn4Dist 
+                                   + Sdnn5Dist  + Sdnn6Dist + Sdnn7Dist + Sdnn8Dist + 
+                                     Sdnn9Dist + Sdnn10Dist), 
+                    list(site = ~0 + fit:site),
+                pred, fam,varb,Nid,root,data=redata)
+summary(remodel4)
+```
+
+
+```{r}
+data %>% group_by(site) %>% summarize(x=sum(isHarvested), y=sum(capsuleCt)) 
+```
+
+
+
+

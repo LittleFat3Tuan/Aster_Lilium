@@ -1,0 +1,217 @@
+---
+title: "Preliminary Analysis on Lilium data"
+author: "Gan Yao"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# 1. Some notes
+
+This is just a preliminary analysis of Lilium data. Plenty of model design choices are still left to discuss.
+
+#### Data inconsistency \
+ \
+There are five individuals in data set with `flCt == 0` but `flNotConsumed == 1`.
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data.csv")
+data[data$flCt == 0,c('id','flCt','flCtNotConsumed')]
+```
+
+Though the data may be correct as it reflects the scientific truth, it is not allowed in aster graph. So during the data cleaning section below, these individuals' `flNotConsumed` values are manually changed to zero.
+
+#### Problem with `nn[k]DistNotConsumed` \
+ \
+Columns `nn[k]DistNotConsumed` are missing for individuals not harvested, and it makes no sense to replace these NAs with any numeric values. So these columns are ignored in this analysis since NAs are not allowed to appear in design matrix.
+
+#### Missing 'fecundity' \
+ \
+The last node of previously proposed aster graph is 'fecundity'. However, it's missing in the dataset and hence is ignored in this analysis.
+
+#### Additional node accounting for sub-sampling. \
+ \
+In order to exploit the entire data set(i.e. not just the harvested ones), a new node `isHarvested` is added to the aster graph.
+
+`isHarvested` is a Bernoulli node placed between `capsuleCt` and `ovuleCt`, and takes values from column `nCapsulesHarvested`. It indicates whether a capsule is harvested or not.
+
+So, considering all above modifications, the aster graph upon which this analysis is based should be
+$$root \rightarrow flCt \rightarrow flNotConsumed \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow SeedSet(embryoCt)$$
+
+# 2. Load and clean data
+
+Import libraries,
+
+```{r}
+library(aster)
+library(tidyverse)
+```
+
+Load Data,
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data.csv")
+names(data)
+```
+
+Look at `site` column,
+
+```{r}
+data %>% count(site)
+```
+
+We should remove rows with site value `lf` and `wrrx`, since they're too rare in this data set.
+
+```{r}
+data <- data[data$site != "lf",]
+data <- data[data$site != "wrrx",]
+data %>% count(site)
+```
+
+Now we handle the inconsistency between `flCt` and `flNotConsumed`,
+
+```{r}
+data %>% count(flNotConsumed)
+```
+
+by manually changing the `flNotConsumed` values of these rows to zero.
+
+```{r}
+data <- data %>% mutate(flNotConsumed = replace(flNotConsumed, flCt==0&flNotConsumed==1, 0))
+data %>% count(flNotConsumed)
+```
+
+To add node `isHarvested`, all the NAs in column `nCapsulesHarvested` should be assigned to zeros.
+
+```{r}
+sum(as.numeric(is.na(data$nCapsulesHarvested)))
+```
+
+```{r}
+data[is.na(data$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+sum(as.numeric(is.na(data$nCapsulesHarvested)))
+sum(as.numeric(data$nCapsulesHarvested==0))
+```
+
+Same for columns `ovuleCt` and `embryoCt`.
+
+```{r}
+sum(as.numeric(is.na(data$ovuleCt)))
+sum(as.numeric(is.na(data$embryoCt)))
+data[is.na(data$ovuleCt), 'ovuleCt'] <- 0
+data[is.na(data$embryoCt), 'embryoCt'] <- 0
+sum(as.numeric(is.na(data$ovuleCt)))
+sum(as.numeric(is.na(data$embryoCt)))
+sum(as.numeric(data$ovuleCt==0))
+sum(as.numeric(data$embryoCt==0))
+```
+
+
+# 3. Wide format to long format
+
+To fit aster model with this dataset, we need to first transform it to so-called 'long format'.
+
+```{r}
+data <- data %>% select("id", "site", "flCt", "flNotConsumed",
+                               "capsuleCt", "nCapsulesHarvested",
+                              "ovuleCt", "embryoCt","nn1Dist","nn2Dist",
+                               "nn3Dist", "nn4Dist","nn5Dist",
+                               "nn6Dist", "nn7Dist", "nn8Dist",
+                               "nn9Dist", "nn10Dist")
+names(data)[names(data) == 'nCapsulesHarvested'] <- 'isHarvested'
+vars <- c("flCt", "flNotConsumed", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+redata <- reshape(data, varying = list(vars), direction="long",
+                  timevar="varb", times = as.factor(vars),
+                  v.names="resp")
+redata <- data.frame(redata, root = 1)
+names(redata)
+```
+
+Last step of preparing data, is to add one column that indicates the best surrogate of fitness in data, in this case, the `embryoCt` level of `varb`.
+
+```{r}
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+names(redata)
+```
+
+
+# 4. Fixed effects aster model
+
+Let's first fit a big model. 
+
+```{r error=TRUE}
+pred <- c(0,1,2,3,4,5)
+fam <- c(2,1,2,1,2,1)
+model1 <- aster(resp ~ varb + fit:(site + nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                   + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                pred, fam,varb,id,root,data=redata)
+summary(model1)
+```
+
+Unfortunately, the `summary()` function will complain about apparent directions of recession, indicating nearly singular fisher information matrix. 
+
+Now let's fit a smaller model and try to locate the problem in our data. 
+
+```{r error = TRUE}
+model2 <- aster(resp ~ varb + fit:(site), pred, fam,varb,id,root,data=redata)
+summary(model2)
+```
+
+The error is still there. So we have to add `info.tol` argument and make it print out the summary anyway.
+
+```{r}
+summary(model2, info.tol = 1e-9)
+```
+
+Notice that the magnitude of estimated coefficient of `varbisHarvested` is abnormally large. This variable corresponds to the node we added to the graph for taking care of sub-sampling. This result may indicate that the way we are now handling the sub-sampling effect is incorrect.
+
+
+```{r}
+model.null <- aster(resp ~ varb, pred, fam,varb,id,root,data=redata)
+#summary(model.null)
+eigen(model.null$fisher)
+summary(model.null, info.tol=1e-9)
+
+null.pred  <- predict(model.null,varvar=varb, idvar=id, root=root,  se.fit=TRUE,  model.type="conditional",info.tol=1e-9)
+matrix(null.pred$fit, ncol=6)
+```
+
+
+# 5. Random effects aster model
+
+Now let's fit the full random effects aster model, and see if the same problem pops out.
+
+```{r}
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+remodel1 <- reaster(resp ~ varb + fit:(nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                   + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                  list(site = ~0 + fit:site),
+                pred, fam,varb,Nid,root,data=redata)
+summary(remodel1)
+```
+
+Though the `summary()` functions did not complain this time, the problem of `varbisHarvested` remain the same. What's more, none of the `nn[k]Dist` features has significant contribution to this model.
+
+In fact, if we fit a null model,
+
+```{r}
+remodel.null <- reaster(resp ~ varb, list(site = ~0 + fit:site),pred, fam,varb,Nid,root,data=redata)
+summary(remodel.null)
+```
+
+And compare the deviance of these two random effects model,
+
+```{r}
+deviance(remodel1)
+deviance(remodel.null)
+deviance(remodel.null) - deviance(remodel1)
+```
+
+we can find that the difference in deviance is only 12.65028, while the difference in number of parameters is 10. Therefore, if we use the AIC as model selection criterion, we will end up picking the null model as our true model.
+
+
+# 6. Discussion
+
+To conclude, the analysis result so far is not satisfying. One major issue now seems to be the sub-sampling procedure. We are now treating it as a Bernoulli node. A potential problem with this approach is that by considering sub-sampling as Bernoulli trials, we assume there's a fixed probability or proportion(i.e. parameter $\theta$ of Bernoulli distribution) that the sub-sampling follows. However this may be not be the case when the sub-sampling was conducted, which will make the $\theta$ correspond to nothing in reality. But we have not come up with other solution for now, so looking forward to further discussion!
+
+
+

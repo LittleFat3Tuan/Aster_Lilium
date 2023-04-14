@@ -1,0 +1,176 @@
+---
+title: "Hand crafting model matrix"
+author: "Gan Yao"
+date: "2022-12-15"
+output: pdf_document
+urlcolor: blue
+---
+
+This analysis attempts to manually create model matrix as suggested in [TR658](https://www.stat.umn.edu/geyer/aster/tr658.pdf) by Shaw et al. However, as it turns out, this is not necessary at least for this `echin2` data and our Lilium data, as we can use R formula to generate the exact same model matrix.
+
+# Reproduction of `echin2` analysis in TR658
+
+```{r message=FALSE}
+library(aster)
+library(tidyverse)
+```
+
+```{r}
+data(echin2)
+```
+
+```{r}
+vars <- c("lds1", "lds2", "lds3", "ld01", "ld02",
+  "ld03", "roct2003", "ld04", "roct2004", "ld05",
+  "roct2005")
+pred <- c(0, 1, 2, 3, 4, 5, 6, 6, 8, 8, 10)
+fam <- c(1, 1, 1, 1, 1, 1, 3, 1, 3, 1, 3)
+nind <- length(unique(echin2$id))
+nnode <- length(levels(echin2$varb))
+```
+
+```{r}
+x <- echin2$resp
+dim(x) <- c(nind, nnode)
+r <- 0 * x + 1
+```
+
+## Hand-crafted model matrix
+
+```{r}
+modmat.super <- NULL
+names.super <- NULL
+for (i in levels(echin2$varb)) {
+ modmat.super <- cbind(modmat.super, as.numeric(echin2$varb ==i))
+ names.super <- c(names.super, i)
+ }
+```
+
+```{r}
+in.greenhouse <- is.element(echin2$varb, grep("lds", levels(echin2$varb), value = TRUE))
+print(unique(echin2$varb[in.greenhouse]), max.levels = 0)
+print(unique(echin2$varb[!in.greenhouse]), max.levels = 0)
+```
+
+```{r}
+for (i in levels(echin2$flat)) if (i > "1") {
+ modmat.super <- cbind(modmat.super, as.numeric(in.greenhouse &
+ echin2$flat == i))
+ names.super <- c(names.super, paste("flat", i,
+ sep = ""))
+ }
+```
+
+
+```{r}
+for (i in levels(echin2$row)) if (i > "10") {
+ modmat.super <- cbind(modmat.super, as.numeric((!in.greenhouse) &
+ echin2$row == i))
+ names.super <- c(names.super, paste("row", i,
+ sep = ""))
+ }
+```
+
+```{r}
+for (i in levels(echin2$yearcross)) if (i >= "2000") {
+ modmat.super <- cbind(modmat.super, as.numeric(echin2$yearcross ==i))
+ names.super <- c(names.super, paste("yc", i, sep = ""))
+ }
+```
+
+```{r}
+modmat.super <- cbind(modmat.super, as.numeric(!in.greenhouse) *  echin2$posi)
+names.super <- c(names.super, "posi")
+```
+
+```{r}
+for (i in levels(echin2$crosstype)) if (i > "W") {
+ modmat.super <- cbind(modmat.super, as.numeric(echin2$crosstype == i & echin2$varb == "roct2005"))
+ names.super <- c(names.super, paste("cross", i, sep = ""))
+ }
+```
+
+```{r}
+for (i in levels(echin2$crosstype)) if (i > "W") {
+ modmat.super <- cbind(modmat.super, as.numeric(echin2$crosstype == i & echin2$varb == "lds3"))
+ names.super <- c(names.super, paste("crossgreen", i, sep = ""))
+ }
+```
+
+```{r}
+nodename <- unique(as.character(echin2$var))
+modmat.super <- array(as.vector(modmat.super), c(dim(x), length(names.super)))
+dimnames(modmat.super) <- list(NULL, nodename, names.super)
+```
+
+## Model fitted with handcrafted model matrix
+
+
+```{r}
+out.super <- aster(x, r, pred, fam, modmat.super)
+summary(out.super)
+```
+
+
+
+# Model matrix by formula
+
+
+
+```{r eval=FALSE, include=FALSE}
+echin2$inGreenHouse <- as.numeric(in.greenhouse)
+echin2$outGreenHouse <- as.numeric(!in.greenhouse)
+echin2$fitField <- as.numeric(echin2$varb == 'roct2005')
+echin2$fitChamber <- as.numeric(echin2$varb == 'lds3')
+out.super.test <- aster(resp ~ -1 + varb + yearcross +inGreenHouse:flat 
+                        + outGreenHouse:row + outGreenHouse:posi 
+                        + fitField:crosstype + fitChamber:crosstype,
+                        pred, fam, varb, id, root, data=echin2) 
+```
+
+```{r eval=FALSE, include=FALSE}
+summary(out.super.test, info.tol=1e-12)
+```
+
+By creating necessary variables and applying R formula, we can get the exact same model.
+
+```{r}
+resp <- echin2$resp
+varb <- echin2$varb
+inGreenHouse <- as.numeric(in.greenhouse)
+outGreenHouse <- as.numeric(!in.greenhouse)
+fitField <- as.numeric(echin2$varb == 'roct2005')
+fitChamber <- as.numeric(echin2$varb == 'lds3')
+yearcross <- echin2$yearcross
+flat2 <- as.numeric(echin2$flat == 2)
+flat3 <- as.numeric(echin2$flat == 3)
+row11 <- as.numeric(echin2$row == 11)
+row12 <- as.numeric(echin2$row == 12)
+row13 <- as.numeric(echin2$row == 13)
+crossWi <- as.numeric(echin2$crosstype == 'Wi')
+crossWr <- as.numeric(echin2$crosstype == 'Wr')
+posi <- echin2$posi
+```
+
+```{r}
+out.super.test_2 <- aster(resp ~ -1 + varb + yearcross +inGreenHouse:flat2 + inGreenHouse:flat3 
+                        + outGreenHouse:row11 + outGreenHouse:row12 + outGreenHouse:row13 + outGreenHouse:posi 
+                        + fitField:crossWi + fitField:crossWr + fitChamber:crossWi + fitChamber:crossWr,
+                        pred, fam, varb, echin2$id, echin2$root)
+```
+
+```{r}
+sum(is.na(echin2))
+```
+
+```{r}
+summary(out.super.test_2)
+```
+
+`out.super` and `out.super.test_2` are the same.
+
+
+
+
+
+

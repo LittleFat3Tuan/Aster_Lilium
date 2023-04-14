@@ -1,0 +1,958 @@
+---
+title: "Mode models and landscape"
+author: "Gan Yao"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+This analysis include more models that are of our interest, as well as generating fitness landscape of these models.
+
+# Aaster graph
+
+$$root \rightarrow flCt \rightarrow flCtNotConsumed \rightarrow flCtUndamaged \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow embryoCt(fitness)$$
+
+# Load library and data, transfer data
+
+```{r message=FALSE, warning=FALSE}
+library(aster)
+library(tidyverse)
+library(plotly)
+library(hrbrthemes)
+library(viridis)
+library(gridExtra)
+library(metR)
+```
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data30Nov2022.csv")
+names(data)
+```
+
+```{r}
+data <- data[data$site != "lf",]
+data <- data[data$site != "wrrx",]
+data[is.na(data$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+data[is.na(data$ovuleCt), 'ovuleCt'] <- 0
+data[is.na(data$embryoCt), 'embryoCt'] <- 0
+names(data)[names(data) == 'nCapsulesHarvested'] <- 'isHarvested'
+```
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", 
+          "isHarvested", "ovuleCt", "embryoCt")
+#test <- data %>% mutate(nn5Dist_s = nn5Dist/1000, 
+                        #nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 0)) %>% 
+  #mutate(nn5DistNotConsumed_s = nn5DistNotConsumed/1000)
+
+test <- data %>% mutate(nn5Dist_s = log(nn5Dist)/10, 
+                        nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 1)) %>% 
+  mutate(nn5DistNotConsumed_s = log(nn5DistNotConsumed)/10)
+
+redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", 
+                  times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+
+names(redata)
+```
+
+```{r}
+redata$Deer <- as.numeric(redata$varb=='flCtNotConsumed')
+redata$Pollination <- as.numeric(is.element(redata$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+
+names(redata)
+```
+
+```{r}
+# extreme_nnA <- unique(redata[redata$nn5Dist_s < 0,'id'])
+# redata <- redata[(!redata$id %in% extreme_nnA), ]
+```
+
+
+
+# Models
+
+## Model 0: Null Model
+
+```{r}
+model.null <- aster(resp ~ -1 + varb, 
+                pred, fam,varb,id,root,data=redata)
+#summary(model3, info.tol=1e-12)
+summary(model.null)
+
+eigen(model.null$fisher)$val
+```
+
+## Model 1: $Fitness:nnA$
+
+```{r}
+model1 <- aster(resp ~ -1 + varb + fit:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model1)
+```
+
+## Model 2: $Deer:nnA$
+
+```{r}
+model2 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model2)
+```
+
+## Model 3: $Pollination:nnA$
+
+```{r}
+model3 <- aster(resp ~ -1 + varb + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model3, info.tol=1e-9)
+summary(model3)
+```
+
+## Model 4: $Fitness:nnA + Deer:nnA$
+
+```{r}
+model4 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model4)
+```
+
+## Model 5: $Fitness:nnA + Pollination:nnA$
+
+```{r}
+model5 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model5, info.tol=1e-9)
+summary(model5)
+```
+
+## Model 6: $Deer:nnA + Pollination:nnA$
+
+```{r}
+model6 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model6, info.tol=1e-9)
+summary(model6)
+```
+
+## Model 7: $Fitness:nnA + Deer:nnA + Pollination:nnA$
+
+```{r}
+model7 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model7, info.tol=1e-9)
+summary(model7)
+```
+
+## Model 8: $Pollination:nnB$
+
+```{r}
+model8 <- aster(resp ~ -1 + varb + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model8)
+```
+
+## Model 9: $Fitness:nnA + Pollination:nnB$
+
+```{r}
+model9 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model9)
+```
+
+## Model 10: $Deer:nnA + Pollination:nnB$
+
+```{r}
+model10 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model10)
+```
+
+## Model 11: $Fitness:nnA + Deer:nnA + Pollination:nnB$
+
+```{r}
+model11 <- aster(resp ~ -1 + varb + fit:nn5Dist_s +Deer:nn5Dist_s + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model11)
+```
+
+# Model Selection
+
+```{r}
+aster_AIC <- function(mod) {
+  return(mod$deviance + 2*length(mod$coefficients))
+}
+```
+
+```{r echo=FALSE}
+print(model.null$formula)
+aster_AIC(model.null)
+
+
+print(model1$formula)
+aster_AIC(model1)
+
+
+print(model2$formula)
+aster_AIC(model2)
+
+
+print(model3$formula)
+aster_AIC(model3)
+
+
+print(model4$formula)
+aster_AIC(model4)
+
+
+print(model5$formula)
+aster_AIC(model5)
+
+
+print(model6$formula)
+aster_AIC(model6)
+
+
+print(model7$formula)
+aster_AIC(model7)
+
+
+print(model8$formula)
+aster_AIC(model8)
+
+
+print(model9$formula)
+aster_AIC(model9)
+
+
+print(model10$formula)
+aster_AIC(model10)
+
+
+print(model11$formula)
+aster_AIC(model11)
+```
+
+# 1-D Fitness landscape
+
+
+
+```{r}
+fitness_landscape <- function(model, covariate = 'nn5Dist_s', lower = NULL, upper = NULL, 
+                              observation=FALSE, scale_back = FALSE) {
+  # Make fake individuals
+  nInd <- 50
+  lwr <- if (is.null(lower)) min(unique(model$data[,covariate])) else lower
+  upr <- if (is.null(upper)) max(unique(model$data[,covariate])) else upper
+  cand.nnA <- seq(from = lwr, to = upr, length = nInd)
+  cand <- as.data.frame(cand.nnA)
+  colnames(cand) <- covariate
+  cand$root <- 1
+  blah <- data[1:nInd, colnames(data) %in% vars]
+  cand <- cbind(cand, blah)
+  cand$id <- data[1:nInd, 'id']
+  
+  # Transform fake data into long format
+  cand_long <- reshape(cand, varying = list(vars), direction="long", timevar="varb", 
+                  times = as.factor(vars), v.names="resp")
+
+  cand_long <- data.frame(cand_long)
+  cand_long$fit <- as.numeric(cand_long$varb == "embryoCt")
+  cand_long$Nid <- as.numeric(gsub("[^0-9.-]", "", cand_long$id))
+  
+  cand_long$Deer <- as.numeric(cand_long$varb=='flCtNotConsumed') 
+  cand_long$Pollination <- as.numeric(is.element(cand_long$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+  #cand_long$Rtail <- as.numeric(cand_long$nn5Dist_s > quantile(cand_long$nn5Dist_s, 0.975)) 
+  #cand_long$Ltail <- as.numeric(cand_long$nn5Dist_s < quantile(cand_long$nn5Dist_s, 0.025)) 
+  
+  # Get conditional mean value parameters
+  pred <- predict(model, cand_long, varvar=varb, idvar=id, root=root,
+                      se.fit = TRUE, model.type='conditional',
+                  is.always.parameter = TRUE, info.tol=1e-8)
+  
+  xi_parm <- pred$fit
+  xi_parm_se <- pred$se.fit
+  
+  names(xi_parm) <- paste0(cand_long$id,'.',cand_long$varb)
+  names(xi_parm_se) <- paste0(cand_long$id,'.',cand_long$varb)
+  
+  xi_parm_grad <- pred$gradient
+  rownames(xi_parm_grad) <- paste0(cand_long$id,'.',cand_long$varb)
+  colnames(xi_parm_grad) <- names(model$coefficients)
+  
+  # Expected fitness
+  Ids <- unique(cand_long$id)
+  exp_fitness <- rep(0,nInd)
+  names(exp_fitness) <- Ids
+  for (id in Ids) {
+    exp_fitness[id] <- prod(xi_parm[grep(paste0(id,'\\.'), names(xi_parm))][-5])
+  }
+  
+  # Get covariance matrix of xi
+  xi_parm_var = xi_parm_grad %*% solve(model$fisher) %*% t(xi_parm_grad)
+
+  # Delta Method
+  var_expfit <- rep(0,nInd)
+  names(var_expfit) <- Ids
+  for (id in Ids) {
+    ind <- paste0(id,'\\.')
+    xi <- xi_parm[grep(ind, names(xi_parm))][-5]
+    var <- xi_parm_var[grep(ind, rownames(xi_parm_var))[-5], 
+                        grep(ind, colnames(xi_parm_var))[-5]]
+    grad <- c(prod(xi[-1]), prod(xi[-2]), prod(xi[-3]), prod(xi[-4]), prod(xi[-5]), prod(xi[-6]))
+    var_expfit[id] <- t(grad) %*% var %*% grad
+  }
+  
+  se_expfit = sqrt(var_expfit)
+  xlabel = if (covariate == 'nn5Dist_s') 'log(nnA)/10' else 'log(nnB)/10'
+  cand_block <- cand %>% mutate(exp_fitness, exp_fitness, lower = exp_fitness - 2 * se_expfit, upper = exp_fitness + 2 * se_expfit)
+  if (scale_back == TRUE) {
+    cand_block[, as.character(covariate)] <- exp(10*cand_block[,as.character(covariate)])
+    xlabel = if (covariate == 'nn5Dist_s') 'nnA' else 'nnB'
+  }
+  #cand_block <- cand_block[1:40,]
+  plt <- ggplot(data = cand_block) + geom_line(mapping = aes(x = cand_block[,as.character(covariate)], y = exp_fitness)) + geom_ribbon(mapping = aes(x = cand_block[,as.character(covariate)], ymin = lower, ymax = upper), alpha = 0.5) 
+  if (observation == TRUE) {
+    obs <- test %>% filter((!!sym(covariate)) > lwr & (!!sym(covariate)) < upr)
+    if (scale_back == TRUE) {
+      plt <- plt + geom_point(data=obs, mapping = aes(x =exp(10*obs[,as.character(covariate)]), 
+                                                      y = obs[,'fecundity']))
+    } else {
+      plt <- plt + geom_point(data=obs, mapping = aes(x =obs[,as.character(covariate)], y = obs[,'fecundity']))
+    }
+  }
+  plt <- plt + labs(x=xlabel, y="Expected fitness", title = paste0("Fitness landscape    ", substr(format(model$formula), start=20, stop=nchar(format(model$formula)))))  + 
+    #annotate(geom='text', x=c(0, 0.1, 0.3, 0.5), y=750, label=c('nnA', '2.718282', '20.085537', '148.413159')) +
+    theme_minimal() + scale_x_continuous(minor_breaks = NULL) +scale_y_continuous(minor_breaks = NULL)
+  
+  print(plt)
+  
+}
+```
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model2, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model3, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model4, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model5, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model6, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model7, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', lower = quantile(test$nn5DistNotConsumed_s, 0.025), upper = quantile(test$nn5DistNotConsumed_s, 0.975))
+```
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model2, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model3, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model4, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model5, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model6, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model7, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE)
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', lower = quantile(test$nn5DistNotConsumed_s, 0.025), upper = quantile(test$nn5DistNotConsumed_s, 0.975), observation = TRUE)
+```
+
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model2, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model3, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model4, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model5, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model6, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model7, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', observation = TRUE, scale_back = TRUE)
+```
+
+
+
+# 2-D Fitness landscape
+
+```{r}
+fitness_landscape_2d <- function(model) {
+  # Make fake individuals
+  nInd <- 50
+  lwr_1 <-quantile(log(data$nn5Dist)/10, 0.025)
+  upr_1 <-quantile(log(data$nn5Dist)/10, 0.975)
+  lwr_2 <-quantile(test$nn5DistNotConsumed_s, 0.025)
+  upr_2 <-quantile(test$nn5DistNotConsumed_s, 0.975)
+  cand.nnA <- seq(from = lwr_1, to = upr_1, length = nInd)
+  cand.nnB <- seq(from = lwr_2, to = upr_2, length = nInd)
+  cand <- expand.grid(cand.nnA, cand.nnB)
+  colnames(cand) <- c('nn5Dist_s', 'nn5DistNotConsumed_s')
+  cand <- as.data.frame(cand)
+  cand$root <- 1
+  blah <- data[1:nInd, colnames(data) %in% vars]
+  blah <- do.call("rbind", replicate(nInd, blah, simplify = FALSE))
+  cand <- cbind(cand, blah)
+
+  cand$id <- paste0('LP', seq(nInd^2))
+  
+  # Transform fake data into long format
+  cand_long <- reshape(cand, varying = list(vars), direction="long", timevar="varb", 
+                  times = as.factor(vars), v.names="resp")
+
+  cand_long <- data.frame(cand_long)
+  cand_long$fit <- as.numeric(cand_long$varb == "embryoCt")
+  cand_long$Nid <- as.numeric(gsub("[^0-9.-]", "", cand_long$id))
+  
+  cand_long$Deer <- as.numeric(cand_long$varb=='flCtNotConsumed')
+  cand_long$Pollination <- as.numeric(is.element(cand_long$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+  
+  # Get conditional mean value parameters
+  pred <- predict(model, cand_long, varvar=varb, idvar=id, root=root,
+                      se.fit = TRUE, model.type='conditional',
+                  is.always.parameter = TRUE, info.tol=1e-8)
+  
+  xi_parm <- pred$fit
+  xi_parm_se <- pred$se.fit
+  
+  names(xi_parm) <- paste0(cand_long$id,'.',cand_long$varb)
+  names(xi_parm_se) <- paste0(cand_long$id,'.',cand_long$varb)
+  
+  xi_parm_grad <- pred$gradient
+  rownames(xi_parm_grad) <- paste0(cand_long$id,'.',cand_long$varb)
+  colnames(xi_parm_grad) <- names(model$coefficients)
+  
+  # Expected fitness
+  Ids <- unique(cand_long$id)
+  exp_fitness <- rep(0,nInd^2)
+  names(exp_fitness) <- Ids
+  for (id in Ids) {
+    exp_fitness[id] <- prod(xi_parm[grep(paste0(id,'\\.'), names(xi_parm))][-5])
+  }
+  
+  # Get covariance matrix of xi
+  xi_parm_var = xi_parm_grad %*% solve(model$fisher) %*% t(xi_parm_grad)
+
+  # Delta Method
+  var_expfit <- rep(0,nInd^2)
+  names(var_expfit) <- Ids
+  for (id in Ids) {
+    ind <- paste0(id,'\\.')
+    xi <- xi_parm[grep(ind, names(xi_parm))][-5]
+    var <- xi_parm_var[grep(ind, rownames(xi_parm_var))[-5], 
+                        grep(ind, colnames(xi_parm_var))[-5]]
+    grad <- c(prod(xi[-1]), prod(xi[-2]), prod(xi[-3]), prod(xi[-4]), prod(xi[-5]), prod(xi[-6]))
+    var_expfit[id] <- t(grad) %*% var %*% grad
+  }
+  
+  se_expfit = sqrt(var_expfit)
+  
+  # Plots
+  cand_block <- cand %>% mutate(exp_fitness, exp_fitness, lower = exp_fitness - se_expfit, upper = exp_fitness + se_expfit)
+  
+  
+  # p1 <- ggplot(data=cand_block, aes(nn5Dist_s, nn5DistNotConsumed_s, fill=lower)) + 
+  # geom_tile() +ggtitle(paste0("Fitness landscape    ", substr(format(model$formula), start=20, stop=nchar(format(model$formula)))))  +
+  # scale_fill_gradient(low="white", high="blue") + 
+  # theme(plot.title = element_text(size=10))
+  
+  # p2 <- ggplot(data=cand_block, aes(nn5Dist_s, nn5DistNotConsumed_s, fill=upper)) + 
+  # geom_tile() +ggtitle(paste0("Fitness landscape    ", substr(format(model$formula), start=20, stop=nchar(format(model$formula)))))  +
+  # scale_fill_gradient(low="white", high="blue") + 
+  #  theme(plot.title = element_text(size=10))
+  
+  # p3 <- ggplot(data=cand_block, aes(nn5Dist_s, nn5DistNotConsumed_s, fill=exp_fitness)) +
+  # geom_tile() +ggtitle(paste0("Fitness landscape    ", substr(format(model$formula), start=20, stop=nchar(format(model$formula)))))  +
+  # scale_fill_gradient(low="white", high="blue") +
+  #  theme(plot.title = element_text(size=10))
+  
+  p3 <- ggplot(cand_block, aes(nn5Dist_s, nn5DistNotConsumed_s, z= exp_fitness, colour=stat(level))) +
+          geom_contour() +
+          geom_text_contour(aes(z = exp_fitness)) +
+          scale_colour_distiller(palette = 'Spectral', direction = 1) +
+          scale_x_continuous(limits = c(lwr_1, upr_1))
+  print(p3)
+  
+  
+  
+  #return(list(lwr = p1, upr = p2, exp = p3))
+  
+  #ggplotly(p3)
+  
+}
+```
+
+
+## Fitness landscape of model 9
+```{r warning=FALSE}
+res <- fitness_landscape_2d(model9)
+# res$lwr
+# res$exp
+# res$upr
+```
+
+## Fitness landscape of model 10
+```{r warning=FALSE}
+res <- fitness_landscape_2d(model10)
+
+#res$lwr
+#res$exp
+#res$upr
+#grid.arrange(res$lwr ,res$exp ,res$upr, ncol=2, nrow=2)
+```
+
+
+## Fitness landscape of model 11
+```{r warning=FALSE}
+res <- fitness_landscape_2d(model11)
+# res$lwr
+# res$exp
+# res$upr
+```
+
+# Handling extreme values
+
+We observed abnormal behaviors on fitness landscapes of `model7`, our best model chosen by AIC,  at both right and left tails. So we try to handle these extreme values of `nn5Dist` study how they affect model performance.
+
+```{r}
+hist(log(data$nn5Dist)/10, breaks=20)
+```
+
+```{r}
+wide2long <- function(org_data) {
+  pred <- c(0,1,2,3,4,5,6)
+  fam <- c(2,1,1,1,1,2,1)
+  vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", 
+            "isHarvested", "ovuleCt", "embryoCt")
+  
+  test <- org_data %>% mutate(nn5Dist_s = log(nn5Dist)/10, 
+                          nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 1)) %>% 
+    mutate(nn5DistNotConsumed_s = log(nn5DistNotConsumed)/10) %>% 
+    mutate(Ltail = ifelse(nn5Dist_s < quantile(nn5Dist_s, 0.025), 1, 0),
+                        Rtail = ifelse(nn5Dist_s > quantile(nn5Dist_s, 0.975), 1, 0)) %>%
+    mutate(middle = ifelse(Ltail+Rtail == 0, 1, 0))
+  
+  redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", 
+                    times = as.factor(vars), v.names="resp")
+  
+  redata <- data.frame(redata, root = 1)
+  redata$fit <- as.numeric(redata$varb == "embryoCt")
+  redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+  redata$Deer <- as.numeric(redata$varb=='flCtNotConsumed')
+  redata$Pollination <- as.numeric(is.element(redata$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+
+  
+  return(redata)
+}
+```
+
+## Zooming-in to the middle range of original landscapes
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model2, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model3, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model4, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model5, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model6, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model7, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', lower = quantile(test$nn5DistNotConsumed_s, 0.025), upper = quantile(test$nn5DistNotConsumed_s, 0.975))
+```
+
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model2, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model3, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model4, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model5, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model6, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model7, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE)
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', lower = quantile(test$nn5DistNotConsumed_s, 0.025), upper = quantile(test$nn5DistNotConsumed_s, 0.975),  observation = TRUE)
+```
+
+```{r}
+#par(mar = c(4, 4, .1, .1))
+fitness_landscape(model1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model2, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model3, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model4, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model5, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model6, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model7, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975),  observation = TRUE,scale_back = TRUE)
+fitness_landscape(model8, covariate = 'nn5DistNotConsumed_s', lower = quantile(test$nn5DistNotConsumed_s, 0.025), upper = quantile(test$nn5DistNotConsumed_s, 0.975),  observation = TRUE,scale_back = TRUE)
+```
+
+
+## Refit models on trimmed data 
+
+```{r}
+model_selection <- function(redata) {
+  mod.null <- aster(resp ~ -1 + varb, pred, fam,varb,id,root,data=redata)
+  mod1 <- aster(resp ~ -1 + varb + fit:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod2 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod3 <- aster(resp ~ -1 + varb + Pollination:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod4 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod5 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Pollination:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod6 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s + Pollination:nn5Dist_s, pred, fam,varb,id,root,data=redata)
+  mod7 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s, 
+                  pred, fam,varb,id,root,data=redata)
+  mod8 <- aster(resp ~ -1 + varb + Pollination:nn5DistNotConsumed_s, pred, fam,varb,id,root,data=redata)
+  AICs <- rep(0, 9)
+  AICs[1] <- mod.null$deviance + 2*length(mod.null$coefficients)
+  AICs[2] <- mod1$deviance + 2*length(mod1$coefficients)
+  AICs[3] <- mod2$deviance + 2*length(mod2$coefficients)
+  AICs[4] <- mod3$deviance + 2*length(mod3$coefficients)
+  AICs[5] <- mod4$deviance + 2*length(mod4$coefficients)
+  AICs[6] <- mod5$deviance + 2*length(mod5$coefficients)
+  AICs[7] <- mod6$deviance + 2*length(mod6$coefficients)
+  AICs[8] <- mod7$deviance + 2*length(mod7$coefficients)
+  AICs[9] <- mod8$deviance + 2*length(mod8$coefficients)
+  print(which.min(AICs))
+}
+```
+
+```{r}
+min10 <- sort(data$nn5Dist)[1:10]
+max10 <- sort(data$nn5Dist, decreasing = TRUE)[1:10]
+```
+
+
+```{r}
+data_copy <- data
+
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist > quantile(nn5Dist, 0.0125)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist < quantile(nn5Dist, 0.9875)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist > quantile(nn5Dist, 0.0125), 
+                                                  nn5Dist < quantile(nn5Dist, 0.9875)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist > quantile(nn5Dist, 0.025)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist < quantile(nn5Dist, 0.975)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+redata_trimmed <- wide2long(data_copy %>% filter(nn5Dist > quantile(nn5Dist, 0.025), 
+                                                  nn5Dist < quantile(nn5Dist, 0.975)))
+mod <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s,
+              pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape(mod)
+
+
+```
+
+```{r}
+aster_AIC(mod)
+```
+
+
+```{r}
+mod_2d <- aster(resp ~ -1 + varb + fit:nn5Dist_s +Deer:nn5Dist_s + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata_trimmed)
+fitness_landscape_2d(mod_2d)
+```
+
+```{r}
+fitness_landscape_2d(model11)
+```
+
+## Modelling tail behavior with higher order
+
+
+
+```{r}
+aster_AIC(model7)
+```
+
+### Quadratic and cubic
+
+
+
+```{r}
+model_comp <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s + 
+                      fit:I(nn5Dist_s^2) + Deer:I(nn5Dist_s^2) + Pollination:I(nn5Dist_s^2), 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model_comp)
+aster_AIC(model_comp)
+#summary(model_comp, info.tol = 1e-9)
+```
+
+```{r}
+model_cubic1 <- aster(resp ~ -1 + varb + fit:(nn5Dist_s+I(nn5Dist_s^3)) + Deer:(I(nn5Dist_s^2)) +
+                      Pollination:(nn5Dist_s+I(nn5Dist_s^3) + I(nn5Dist_s^2)) , 
+                pred, fam,varb,id,root,data=redata)
+
+#summary(model_comp)
+aster_AIC(model_cubic1)
+summary(model_cubic1, info.tol=1e-8)
+```
+
+```{r}
+fitness_landscape(model_cubic1, observation = TRUE)
+fitness_landscape(model_cubic1, observation = TRUE, scale_back = TRUE)
+fitness_landscape(model_cubic1, lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975))
+fitness_landscape(model_cubic1,lower = quantile(log(data$nn5Dist)/10, 0.025), upper = quantile(log(data$nn5Dist)/10, 0.975), observation = TRUE, scale_back = TRUE)
+```
+### Piecewise linear
+
+```{r}
+model_comp <- aster(resp ~ -1 + varb + fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s + 
+                      Ltail:nn5Dist_s + Rtail:nn5Dist_s, 
+                pred, fam,varb,id,root,data=wide2long(data_copy))
+
+#summary(model_comp)
+aster_AIC(model_comp)
+#summary(model_comp, info.tol=1e-8)
+```
+
+```{r}
+model_comp <- aster(resp ~ -1 + varb + middle:(fit:nn5Dist_s + Deer:nn5Dist_s + Pollination:nn5Dist_s) + 
+                      Ltail:(fit:nn5Dist_s) + 
+                      Rtail:(fit:nn5Dist_s  + Pollination:nn5Dist_s), 
+                pred, fam,varb,id,root,data=wide2long(data_copy))
+
+#summary(model_comp)
+aster_AIC(model_comp)
+summary(model_comp, info.tol=1e-11)
+```
+
+### Piecewise quadratic/cubic
+
+```{r}
+model_comp <- aster(resp ~ -1 + varb  +
+                      Rtail:(fit:(I(nn5Dist_s^2)) + Deer:(nn5Dist_s) +Pollination:( I(nn5Dist_s^2))) +
+                      fit:(nn5Dist_s+I(nn5Dist_s^2) ) + Deer:(I(nn5Dist_s^3)) +
+                      Pollination:(nn5Dist_s + I(nn5Dist_s^2)+ I(nn5Dist_s^3))+
+                      Ltail:(fit:(nn5Dist_s) + Pollination:(nn5Dist_s + I(nn5Dist_s^2))), 
+                pred, fam,varb,id,root,data=wide2long(data_copy))
+
+#summary(model_comp)
+aster_AIC(model_comp)
+summary(model_comp, info.tol=1e-12)
+```
+
+
+
+
+## Third order model on trimmed data 
+
+```{r}
+model_cubic2 <- aster(resp ~ -1 + varb + fit:(nn5Dist_s+I(nn5Dist_s^2)) + 
+                      Deer:(I(nn5Dist_s^2)) +
+                      Pollination:(nn5Dist_s+I(nn5Dist_s^2) + I(nn5Dist_s^3)) , 
+                pred, fam,varb,id,root,data=redata_trimmed)
+
+#summary(model_comp)
+aster_AIC(model_cubic2)
+summary(model_cubic2, info.tol=1e-8)
+
+```
+
+```{r}
+fitness_landscape(model_cubic2)
+fitness_landscape(model_cubic2, observation = TRUE)
+fitness_landscape(model_cubic2, scale_back = TRUE)
+fitness_landscape(model_cubic2, observation = TRUE, scale_back = TRUE)
+```
+
+
+# Conditional landscapes
+
+According to Jared and Prof. Wagenius, the U-shape landscape is somehow against biological intuitive. Let's see conditonal landscape of each node.
+
+
+```{r}
+conditional_fitness_landscape <- function(model, covariate = 'nn5Dist_s', lower = NULL, upper = NULL, 
+                              observation=FALSE, scale_back = FALSE) {
+  # Make fake individuals
+  nInd <- 50
+  lwr <- if (is.null(lower)) min(unique(model$data[,covariate])) else lower
+  upr <- if (is.null(upper)) max(unique(model$data[,covariate])) else upper
+  cand.nnA <- seq(from = lwr, to = upr, length = nInd)
+  cand <- as.data.frame(cand.nnA)
+  colnames(cand) <- covariate
+  cand$root <- 1
+  blah <- data[1:nInd, colnames(data) %in% vars]
+  cand <- cbind(cand, blah)
+  cand$id <- data[1:nInd, 'id']
+  
+  # Transform fake data into long format
+  cand_long <- reshape(cand, varying = list(vars), direction="long", timevar="varb", 
+                  times = as.factor(vars), v.names="resp")
+
+  cand_long <- data.frame(cand_long)
+  cand_long$fit <- as.numeric(cand_long$varb == "embryoCt")
+  cand_long$Nid <- as.numeric(gsub("[^0-9.-]", "", cand_long$id))
+  
+  cand_long$Deer <- as.numeric(cand_long$varb=='flCtNotConsumed') 
+  cand_long$Pollination <- as.numeric(is.element(cand_long$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+  cand_long$Rtail <- as.numeric(cand_long$nn5Dist_s > quantile(cand_long$nn5Dist_s, 0.975)) 
+  cand_long$Ltail <- as.numeric(cand_long$nn5Dist_s < quantile(cand_long$nn5Dist_s, 0.025)) 
+  
+  # Get conditional mean value parameters
+  pred <- predict(model, cand_long, varvar=varb, idvar=id, root=root,
+                      se.fit = TRUE, model.type='conditional',
+                  is.always.parameter = TRUE, info.tol=1e-8)
+  
+  xi_parm <- pred$fit
+  xi_parm_se <- pred$se.fit
+  
+  names(xi_parm) <- paste0(cand_long$id,'.',cand_long$varb)
+  names(xi_parm_se) <- paste0(cand_long$id,'.',cand_long$varb)
+  
+  conditional_exp <- matrix(xi_parm, nrow=50)
+  rownames(conditional_exp) <- cand$id
+  colnames(conditional_exp) <- paste0(vars,'.exp')
+  
+  conditional_exp_se <- matrix(xi_parm_se, nrow=50)
+  rownames(conditional_exp_se) <- cand$id
+  colnames(conditional_exp_se) <- paste0(vars,'.exp_se')
+  
+  
+  cand_block <- cbind(cand, conditional_exp, conditional_exp_se)
+  
+  xlabel = if (covariate == 'nn5Dist_s') 'log(nnA)/10' else 'log(nnB)/10'
+
+  #cand_block <- cand %>% mutate(xi_parm[1:50], xi_parm, lower = xi_parm[1:50] - 2 * xi_parm_se[1:50], upper = xi_parm[1:50] + 2 * xi_parm_se[1:50])
+  if (scale_back == TRUE) {
+    cand_block[, as.character(covariate)] <- exp(10*cand_block[,as.character(covariate)])
+    xlabel = if (covariate == 'nn5Dist_s') 'nnA' else 'nnB'
+  }
+  #cand_block <- cand_block[1:40,]
+  for (node in vars) {
+    plt <- ggplot(data = cand_block) + geom_line(mapping = aes(x = cand_block[,as.character(covariate)], y = cand_block[, paste0(node, '.exp')])) + geom_ribbon(mapping = aes(x = cand_block[,as.character(covariate)], ymin = cand_block[, paste0(node, '.exp')] - 2*cand_block[, paste0(node, '.exp_se')], ymax = cand_block[, paste0(node, '.exp')] + 2*cand_block[, paste0(node, '.exp_se')]), alpha = 0.5)
+    if (observation == TRUE) {
+      obs <- test %>% filter((!!sym(covariate)) > lwr & (!!sym(covariate)) < upr)
+      if (scale_back == TRUE) {
+        plt <- plt + geom_point(data=obs, mapping = aes(x =exp(10*obs[,as.character(covariate)]),
+                                                        y = obs[,'fecundity']))
+      } else {
+        plt <- plt + geom_point(data=obs, mapping = aes(x =obs[,as.character(covariate)], y = obs[,'fecundity']))
+      }
+    }
+    plt <- plt + labs(x=xlabel, y="Expected fitness", title = paste0("Conditional fitness landscape of   ", node))  +
+      #annotate(geom='text', x=c(0, 0.1, 0.3, 0.5), y=750, label=c('nnA', '2.718282', '20.085537', '148.413159')) +
+      theme_minimal() + scale_x_continuous(minor_breaks = NULL) +scale_y_continuous(minor_breaks = NULL)
+  
+    print(plt)
+  }
+  
+  
+}
+```
+
+
+```{r}
+conditional_fitness_landscape(model7)
+```
+
+```{r}
+conditional_fitness_landscape(model_cubic1)
+```
+
+```{r}
+conditional_fitness_landscape(model_cubic2)
+```
+
+
+# Zero-inflated model
+
+As a comparison, a zero-inflated poisson model is fitted.
+
+```{r}
+library(pscl)
+```
+
+```{r}
+mod_zeroinfl <- zeroinfl(embryoCt ~ nn5Dist_s, dist = 'poisson', data = test)
+summary(mod_zeroinfl)
+```
+
+```{r}
+landscape_zeroinfl <- function(model, covariate = 'nn5Dist_s', lower = NULL, upper = NULL, 
+                              observation=FALSE, scale_back = FALSE) {
+  # Make fake individuals
+  nInd <- 50
+  lwr <- if (is.null(lower)) min(unique(model$model[,covariate])) else lower
+  upr <- if (is.null(upper)) max(unique(model$model[,covariate])) else upper
+  cand.nnA <- seq(from = lwr, to = upr, length = nInd)
+  cand <- as.data.frame(cand.nnA)
+  colnames(cand) <- covariate
+  cand$root <- 1
+  blah <- data[1:nInd, colnames(data) %in% vars]
+  cand <- cbind(cand, blah)
+  cand$id <- data[1:nInd, 'id']
+  
+  #print(head(cand))
+  
+  
+  # Get conditional mean value parameters
+  pred <- predict(model, newdata=cand, type='response')
+  #print(pred)
+  
+  pred_prob <- predict(model, newdata=cand, type='prob')
+  #print(dim(pred_prob))
+  
+  xlabel = if (covariate == 'nn5Dist_s') 'log(nnA)/10' else 'log(nnB)/10'
+  if (scale_back == TRUE) {
+    cand[, as.character(covariate)] <- exp(10*cand[,as.character(covariate)])
+    xlabel = if (covariate == 'nn5Dist_s') 'nnA' else 'nnB'
+  }
+  #cand_block <- cand_block[1:40,]
+  plt <- ggplot(data = cand) + geom_line(mapping = aes(x = cand[,as.character(covariate)], y = pred))
+  if (observation == TRUE) {
+    obs <- test %>% filter((!!sym(covariate)) > lwr & (!!sym(covariate)) < upr)
+    if (scale_back == TRUE) {
+      plt <- plt + geom_point(data=obs, mapping = aes(x =exp(10*obs[,as.character(covariate)]), 
+                                                      y = obs[,'fecundity']))
+    } else {
+      plt <- plt + geom_point(data=obs, mapping = aes(x =obs[,as.character(covariate)], y = obs[,'fecundity']))
+    }
+  }
+  plt <- plt + labs(x=xlabel, y="Expected fitness", title = paste0("Fitness landscape    ", substr(format(model$formula), start=20, stop=nchar(format(model$formula)))))  + 
+    #annotate(geom='text', x=c(0, 0.1, 0.3, 0.5), y=750, label=c('nnA', '2.718282', '20.085537', '148.413159')) +
+    theme_minimal() + scale_x_continuous(minor_breaks = NULL) +scale_y_continuous(minor_breaks = NULL)
+  
+  print(plt)
+  return(pred_prob)
+}
+```
+
+```{r}
+zeroinfl_pred_prob <- landscape_zeroinfl(mod_zeroinfl)
+```
+
+

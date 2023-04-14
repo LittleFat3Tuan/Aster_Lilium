@@ -1,0 +1,136 @@
+---
+title: "Including nn[k]DistNotConsumed"
+author: "Gan Yao"
+date: "2022-12-15"
+output: pdf_document
+urlcolor: blue
+---
+
+
+# Intro
+
+This analysis is to reproduce the trick performed in [TR658](https://www.stat.umn.edu/geyer/aster/tr658.pdf) by Shaw et al. In their analysis, variable `flat` only makes sense to nodes `ldsi`, while variables `posi` and `row` only make sense to nodes `ld0i` and `r0i`. In our analysis, `nn[k]Dist` makes sense to all nodes, while `nn[k]DistNotConsumed` only makes sense to nodes after `isHarvested`.
+
+In TR658, it is suggested that model matrix should be manually created in this case. But as studied in *HandCrafted_ModMat.pdf*, this is not necessary.
+
+Another tricky thing about `nn[k]DistNotConsumed` is that it only has valid values for sampled individuals, and are NAs for the rest. We deal with these NAs by replacing them with zeros. One might think this behavior incorrectly assigns zero `nn[k]DistNotConsumed` values to those individuals which may harm our model. However, as pointed out in TR658, this is an illusion and we do not need to worry about it. 
+
+
+# New modelling choices
+
+Thanks to Dr. Jared Beck and Prof. Stuart Wagenius, who pointed out that `nn[k]Dist` are highly correlated(so are `nn[k]DistDistNotConsumed`), we decide to only include `nn5Dist` and `nn5DistNotConsumed` as covariates and fit new models. Also, it may not be appropriate to include `site` as random effect in model. Hence we step back to only consider fixed effects model. 
+
+# Data
+
+After some correction, the latest version of data is complete and tidy. Inconsistencies found in previous analyses are solved.
+
+# Aaster graph
+
+$$root \rightarrow flCt \rightarrow flCtNotConsumed \rightarrow flCtUndamaged \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow embryoCt(fitness)$$
+
+# Load library and data, fit basic models
+
+```{r message=FALSE}
+library(aster)
+library(tidyverse)
+```
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data30Nov2022.csv")
+names(data)
+```
+
+```{r}
+data <- data[data$site != "lf",]
+data <- data[data$site != "wrrx",]
+data[is.na(data$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+data[is.na(data$ovuleCt), 'ovuleCt'] <- 0
+data[is.na(data$embryoCt), 'embryoCt'] <- 0
+names(data)[names(data) == 'nCapsulesHarvested'] <- 'isHarvested'
+```
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed", "flCtUndamaged", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+
+redata <- reshape(data, varying = list(vars), direction="long", timevar="varb", times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+model.null <- aster(resp ~ -1 + varb, 
+                pred, fam,varb,id,root,data=redata)
+summary(model.null)
+
+eigen(model.null$fisher)$val
+```
+
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+test <- data %>% mutate(ovuleCt = round(ovuleCt/1), embryoCt = round(embryoCt/1), 
+                        nn5Dist_s = scale(nn5Dist))
+
+redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", times = as.factor(vars), v.names="resp")
+#redata <- reshape(data, varying = list(vars), direction="long", timevar="varb", times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+#names(redata)
+model1 <- aster(resp ~ -1 + varb + fit:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+#summary(model1, info.tol = 1e-15)
+summary(model1)
+
+eigen(model1$fisher)$val
+```
+
+
+# Attempts to include nn[k]DistNotConsumed
+
+Scale `nn5Dist`, divide `nn5DistNotConsumed` by 1000
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+test <- data %>% mutate(nn5Dist_s = scale(nn5Dist), nnDist_s2 =replace_na(nn5DistNotConsumed, 0)) %>% mutate(nn5DistNotConsumed_s = replace_na(nn5DistNotConsumed, 0), nn5DistNotConsumed = replace_na(nn5DistNotConsumed,0), nnDist_s2 = nnDist_s2/1000,  nn5DistNotConsumed_s = scale(nn5DistNotConsumed_s))
+#test <- data %>% mutate(nn5Dist_s = nn5Dist/100, nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 0))
+redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+#names(redata)
+model2 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + fit:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+#summary(model2, info.tol=1e-12)
+summary(model2)
+
+eigen(model2$fisher)$val
+```
+
+Divide `nn5Dist` by 1000, divide `nn5DistNotConsumed` by 1000
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", "isHarvested", "ovuleCt", "embryoCt")
+test <- data %>% mutate(nn5Dist_s = nn5Dist/1000, nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 0)) %>% mutate(nn5DistNotConsumed_s = nn5DistNotConsumed/1000)
+redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+#names(redata)
+model3 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + fit:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+#summary(model3, info.tol=1e-12)
+summary(model3)
+
+eigen(model3$fisher)$val
+```
+
+

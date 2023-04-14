@@ -1,0 +1,245 @@
+---
+title: "Model Selection"
+author: "Gan Yao"
+date: "2023-01-20"
+output: pdf_document
+---
+
+This analysis conducts model selection by AIC on models that are of our particular interest.
+
+
+# Aaster graph
+
+$$root \rightarrow flCt \rightarrow flCtNotConsumed \rightarrow flCtUndamaged \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow embryoCt(fitness)$$
+
+# Load library and data, transfer data
+
+```{r message=FALSE}
+library(aster)
+library(tidyverse)
+```
+
+```{r}
+data <- read.csv("data/output/remLilium2021Data30Nov2022.csv")
+names(data)
+```
+
+```{r}
+data <- data[data$site != "lf",]
+data <- data[data$site != "wrrx",]
+data[is.na(data$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+data[is.na(data$ovuleCt), 'ovuleCt'] <- 0
+data[is.na(data$embryoCt), 'embryoCt'] <- 0
+names(data)[names(data) == 'nCapsulesHarvested'] <- 'isHarvested'
+```
+
+```{r}
+pred <- c(0,1,2,3,4,5,6)
+fam <- c(2,1,1,1,1,2,1)
+vars <- c("flCt", "flCtNotConsumed","flCtUndamaged", "capsuleCt", 
+          "isHarvested", "ovuleCt", "embryoCt")
+test <- data %>% mutate(nn5Dist_s = nn5Dist/1000, 
+                        nn5DistNotConsumed =replace_na(nn5DistNotConsumed, 0)) %>% 
+  mutate(nn5DistNotConsumed_s = nn5DistNotConsumed/1000)
+
+redata <- reshape(test, varying = list(vars), direction="long", timevar="varb", 
+                  times = as.factor(vars), v.names="resp")
+
+redata <- data.frame(redata, root = 1)
+redata$fit <- as.numeric(redata$varb == "embryoCt")
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+
+names(redata)
+```
+
+```{r}
+redata$Deer <- as.numeric(redata$varb=='flCtNotConsumed')
+redata$Pollination <- as.numeric(is.element(redata$varb, 
+                                c("capsuleCt", "isHarvested", "ovuleCt", "embryoCt")))
+
+names(redata)
+```
+
+# Null Model
+
+```{r}
+model.null <- aster(resp ~ -1 + varb, 
+                pred, fam,varb,id,root,data=redata)
+#summary(model3, info.tol=1e-12)
+summary(model.null)
+
+eigen(model.null$fisher)$val
+```
+
+# Provious Models
+
+```{r}
+model.P1 <- aster(resp ~ -1 + varb + fit:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model.P1)
+```
+
+```{r}
+model.P2 <- aster(resp ~ -1 + varb + fit:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model.P2)
+```
+
+```{r}
+model.P3 <- aster(resp ~ -1 + varb + fit:nn5Dist_s + fit:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+
+summary(model.P3)
+```
+
+# Model1: $Deer \sim 1$, $Pollination \sim nnA$
+
+```{r}
+model1 <- aster(resp ~ -1 + varb + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+summary(model1)
+
+eigen(model1$fisher)$val
+```
+
+# Model2: $Deer \sim 1$ and $Pollination \sim nnB$
+
+```{r}
+model2 <- aster(resp ~ -1 + varb + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+summary(model2)
+
+eigen(model2$fisher)$val
+```
+
+# Model3: $Deer \sim nnA$ and $Pollination \sim 1$
+
+```{r}
+model3 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+summary(model3)
+
+eigen(model3$fisher)$val
+```
+
+# Model4: $Deer \sim nnA$ and $Pollination \sim nnA$
+
+```{r}
+model4 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s + Pollination:nn5Dist_s, 
+                pred, fam,varb,id,root,data=redata)
+summary(model4, info.tol=1e-9)
+
+eigen(model4$fisher)$val
+```
+
+# Model5: $Deer \sim nnA$ and $Pollination \sim nnB$
+
+```{r}
+model5 <- aster(resp ~ -1 + varb + Deer:nn5Dist_s + Pollination:nn5DistNotConsumed_s, 
+                pred, fam,varb,id,root,data=redata)
+summary(model5)
+
+eigen(model5$fisher)$val
+```
+
+# Model Selection
+
+Wrap up a function for computing AIC of aster models.
+
+```{r}
+aster_AIC <- function(mod) {
+  return(mod$deviance + 2*length(mod$coefficients))
+}
+```
+
+```{r echo=FALSE}
+print(model.null$formula)
+aster_AIC(model.null)
+
+
+print(model.P1$formula)
+aster_AIC(model.P1)
+
+
+print(model.P2$formula)
+aster_AIC(model.P2)
+
+
+print(model.P3$formula)
+aster_AIC(model.P3)
+
+
+print(model1$formula)
+aster_AIC(model1)
+
+
+print(model2$formula)
+aster_AIC(model2)
+
+
+print(model3$formula)
+aster_AIC(model3)
+
+
+print(model4$formula)
+aster_AIC(model4)
+
+
+print(model5$formula)
+aster_AIC(model5)
+```
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| Model      | Formula                                                       | AIC            | P-values of interaction terms |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 1          | $$                                                            | -249884.7\     | NA                            |
+|            |                   resp \sim varb                              |                |                               |
+|            |                   $$                                          |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 2          | $$                                                            | -249890.7\     | 0.7e-3                        |
+|            |                   resp \sim varb + Pollination:nnA            |                |                               |
+|            |                   $$                                          |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 3          | $$                                                            | **-249906.9**\ | 1.83e-9                       |
+|            |                   resp \sim varb + Pollination:nnB            |                |                               |
+|            |                   $$                                          |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 4          | $$                                                            | -249890.1\     | 0.00298                       |
+|            |                   resp \sim varb + Deer:nnA                   |                |                               |
+|            |                   $$                                          |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 5          | $$                                                            | -249891.1\     | 0.0997, 0.0667                |
+|            |                   resp \sim varb + Deer:nnA + Pollination:nnA |                |                               |
+|            |                   $$                                          |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 6          | $$                                                            | **-249905.8**\ | 0.341, 1.8e-6                 |
+|            |          resp \sim varb + Deer:nnA + Pollination:nnB          |                |                               |
+|            |          $$                                                   |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 7          | $$                                                            | -249886.9\     | 0.0186                        |
+|            | resp \sim varb + fit:nnA                                      |                |                               |
+|            | $$                                                            |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 8          | $$                                                            | **-249899.3**\ | 1.09e-6                       |
+|            | resp \sim varb + fit:nnB                                      |                |                               |
+|            | $$                                                            |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+| 9          | $$                                                            | -249898.2\     | 0.334, 3.71e-6                |
+|            | resp \sim varb + fit:nnA + fit:nnB                            |                |                               |
+|            | $$                                                            |                |                               |
++------------+---------------------------------------------------------------+----------------+-------------------------------+
+
+# 

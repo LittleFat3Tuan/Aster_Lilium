@@ -1,0 +1,128 @@
+---
+title: "Investigation on sub-sampling"
+author: "Gan Yao"
+date: "`r Sys.Date()`"
+output: pdf_document
+urlcolor: blue
+---
+
+## Genral idea
+
+This analysis attempts to handle the sub-sampling node in aster graph, by considering expected fitness as products of conditional mean value parameters.
+
+Recall the proposed aster graph for Lilium data,
+
+$$root \rightarrow flCt \rightarrow flNotConsumed \rightarrow capsuleCt \rightarrow isHarvested \rightarrow ovuleCt \rightarrow embryoCt(fitness)$$
+
+Denote conditional mean value parameters of six non-root nodes sequentially as $\xi_1, \xi_2, \xi_3, \xi_4, \xi_5, \xi_6$. Then the expected fitness should be,
+
+$$\xi_1\xi_2\xi_3\xi_5\xi_6$$
+
+Also, to apply this procedure on random effects model. A little trick is used to transform variance components to the scale of conditional mean value parameters to enable later delta methods.
+
+Above ideas are borrowed from Prof. Dan Eck's summer project write up and Prof. Geyer's [TR696](https://conservancy.umn.edu/handle/11299/152355).
+
+## Analysis
+
+Load libraries and read data.
+
+```{r message=FALSE}
+library(aster)
+library(tidyverse)
+redata <- read.csv("Lilium_processed.csv")
+redata$site <- as.factor(redata$site)
+redata$varb <- as.factor(redata$varb)
+```
+
+First fit the full random effects model.
+
+```{r}
+pred <- c(0,1,2,3,4,5)
+fam <- c(2,1,2,1,2,1)
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+remodel <- reaster(resp ~ varb + fit:(nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                       + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                    list(site = ~0 + fit:site),
+                    pred, fam,varb,Nid,root,data=redata)
+```
+
+And a fixed effects model that will be 'tricked' by us to do the transformation.
+
+```{r}
+femodel <- aster(resp ~ varb + fit:(site+nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                       + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                    pred, fam,varb,Nid,root,data=redata)
+```
+
+Get the parameters of random effects model.
+
+```{r}
+alpha.hat <- remodel$alpha
+b.hat <- remodel$b
+fred <- c(alpha.hat, b.hat)
+idx <- match(names(femodel$coefficients), names(fred))
+idx
+fred[-idx]
+```
+
+Now we do the transformation by calling `predict` on fixed effects model, but with the parameters of random effects model.
+
+```{r error=TRUE}
+pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newcoef=fred[idx], 
+                model.type = 'conditional')
+```
+
+Direction of recession problem pops out again. Set `info.tol`. Note that we jumped directly from canonical parameter scale to conditional mean value parameter scale. To make sure `predict` function output what we want, set `is.always.parameter = TRUE`.
+
+```{r}
+pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newcoef=fred[idx], 
+                model.type = 'conditional', info.tol  = 1e-11, is.always.parameter = TRUE)
+
+xis <- pred$fit
+names(xis) <- redata$X
+```
+
+Get variation of conditional mean value parameters by delta method.
+
+```{r}
+foo <- pred$gradient
+rownames(foo) <- redata$X
+colnames(foo) <- names(femodel$coefficients)
+#thegradient <- foo[, "fit:sitebeng"]
+thegradient <- foo[, c("fit:sitebeng", "fit:sitehegg", "fit:sitesppe")]
+thevariance <- thegradient %*% t(thegradient) * remodel$nu
+rownames(thevariance) <- redata$X
+```
+
+Expected fitness is products of conditional mean value parameters.
+
+```{r}
+Ids <- unique(redata$id)
+exp_fitness <- rep(0,697)
+names(exp_fitness) <- Ids
+for (id in Ids) {
+  exp_fitness[id] <- prod(xis[grep(id, names(xis))][-4])
+}
+```
+
+Call delta method again to get variation of expected fitness.
+
+```{r}
+var_expfit <- rep(0,697)
+names(var_expfit) <- Ids
+for (id in Ids) {
+  ind <- paste(id,'\\.', sep='')
+  xi <- xis[grep(ind, names(xis))][-4]
+  var <- thevariance[grep(ind, rownames(thevariance))[-4], 
+                     grep(ind, colnames(thevariance))[-4]]
+  grad <- c(prod(xi[-1]), prod(xi[-2]), prod(xi[-3]), prod(xi[-4]), prod(xi[-5]))
+  var_expfit[id] <- t(grad) %*% var %*% grad
+}
+```
+
+Let's take at look at the expected fitness and variation of some individuals.
+
+```{r}
+sd_expfit = sqrt(var_expfit)
+head(cbind(exp_fitness,sd_expfit),20)
+```

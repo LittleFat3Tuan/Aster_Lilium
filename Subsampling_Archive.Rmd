@@ -1,0 +1,137 @@
+---
+title: "Investigation on sub-sampling"
+author: "Gan Yao"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+Load libraries and read data.
+
+```{r message=FALSE}
+library(aster)
+library(tidyverse)
+redata <- read.csv("Lilium_processed.csv")
+redata$site <- as.factor(redata$site)
+redata$varb <- as.factor(redata$varb)
+```
+
+First fit the full random effects model.
+
+```{r}
+pred <- c(0,1,2,3,4,5)
+fam <- c(2,1,2,1,2,1)
+redata$Nid <- as.numeric(gsub("[^0-9.-]", "", redata$id))
+remodel <- reaster(resp ~ varb + fit:(nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                       + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                    list(site = ~0 + fit:site),
+                    pred, fam,varb,Nid,root,data=redata)
+```
+
+And a fixed effects model to help us with the transformation.
+
+```{r}
+femodel <- aster(resp ~ varb + fit:(site+nn1Dist + nn2Dist + nn3Dist + nn4Dist + nn5Dist
+                                       + nn6Dist + nn7Dist + nn8Dist + nn9Dist + nn10Dist), 
+                    pred, fam,varb,Nid,root,data=redata)
+```
+
+Get our "new data", which is just data for one individual.
+
+```{r eval=FALSE, include=FALSE}
+id <- redata$id
+inies <- id == min(id)
+#inies <- id == 'LP1012'
+newdata <- redata[inies, ]
+dim(newdata)
+```
+
+Get the parameters of random effects model for prediction.
+
+```{r}
+alpha.hat <- remodel$alpha
+b.hat <- remodel$b
+fred <- c(alpha.hat, b.hat)
+idx <- match(names(femodel$coefficients), names(fred))
+idx
+fred[-idx]
+```
+
+Now we do the prediction.
+
+```{r error=TRUE}
+pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newcoef=fred[idx], model.type = 'conditional')
+pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newdata=newdata, newcoef=fred[idx], model.type = 'conditional')
+```
+
+Direction of recession problem pops out again. Set `info.tol`.
+
+```{r}
+
+#Prediction for all individuals, with `is.always.parameter` being TRUE
+pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newcoef=fred[idx], model.type = 'conditional', info.tol  = 1e-11, is.always.parameter = TRUE)
+#uncond_pred <- predict(femodel, varvar=varb, idvar=id, root=root, se.fit=TRUE, newcoef=fred[idx], info.tol  = 1e-11, is.always.parameter = TRUE)
+
+
+xis <- pred$fit
+names(xis) <- redata$X
+
+```
+
+Get variation of mean value parameters by delta method.
+
+```{r}
+foo <- pred$gradient
+rownames(foo) <- redata$X
+colnames(foo) <- names(femodel$coefficients)
+thegradient <- foo[, "fit:sitebeng"]
+thevariance <- thegradient %*% t(thegradient) * remodel$nu
+rownames(thevariance) <- redata$X
+```
+
+Expected fitness should be $\xi_1\xi_2\xi_3\xi_5\xi_6$.
+
+```{r}
+exp_fitness <- rep(0,697)
+for (i in 1:697) {
+  ind <- orgdata[i, 'id']
+  exp_fitness[i] <- prod(xis[grep(ind, names(xis))][-4])
+}
+```
+
+Get variation of expected fitness by delta method.
+
+```{r}
+var_expfit <- rep(0,697)
+for (i in 1:697) {
+  ind <- orgdata[i, 'id']
+  ind <- paste(ind,'\\.', sep='')
+  xi <- xis[grep(ind, names(xis))][-4]
+  var <- thevariance[grep(ind, rownames(thevariance))[-4], grep(ind, colnames(thevariance))[-4]]
+  grad <- c(prod(xi[-1]), prod(xi[-2]), prod(xi[-3]), prod(xi[-4]), prod(xi[-5]))
+  var_expfit[i] <- t(grad) %*% var %*% grad
+}
+```
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+orgdata <- read.csv("data/output/remLilium2021Data.csv")
+orgdata <- orgdata[orgdata$site != "lf",]
+orgdata <- orgdata[orgdata$site != "wrrx",]
+orgdata[is.na(orgdata$nCapsulesHarvested), 'nCapsulesHarvested'] <- 0
+orgdata %>% group_by(site) %>% summarize(mean(nCapsulesHarvested))
+```
+
+```{r eval=FALSE, include=FALSE}
+test.pred <- predict(femodel, varvar=varb, idvar=id, root=root,  se.fit=TRUE, newcoef=fred[idx], model.type="conditional", info.tol=1e-11)
+
+
+cond.pred <- matrix(test.pred$fit, ncol=6)
+colnames(cond.pred) <- c('flCt_c','flNotCon_c','capsuleCt_c','isHarvested_c','ovuleCt_c','embryoCt_c')
+org_b_cond <- cbind(orgdata, cond.pred)
+
+org_b_cond %>% group_by(site, flCt) %>% summarize(mean(nCapsulesHarvested))
+
+test.se_mat <- matrix(test.pred$se.fit, ncol=6)
+```

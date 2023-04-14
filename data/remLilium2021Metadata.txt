@@ -1,0 +1,25 @@
+## Metadata for remLilium2021Data.csv ##
+
+id: unique identifier for plant
+
+year: year in which data were collected
+
+site: patch of prairie where plant is located
+
+flCt: Number of flowers produced, note only flowers that produced pollen were counted
+
+flNotConsumed: logical vector indicating whether flowers avoided deer herbivory (1) or were consumed by deer (0)
+
+flUndamaged: logical vector indicating whether flowers were undamaged and could produce capsules (1) or were damaged by deer, insects, or were damaged in ways that would prevent capsule formation (0)
+
+capsuleCt: Number of capsules produced
+
+nCapsulesHarvested: Number of capsules that were harvested
+
+ovuleCt: total number of ovules produced by plant
+
+embryoCt: number of "seeds" produced by plant
+
+nn[k].dist: distance in meters to k^th nearest reproductive Lilium, k = 1-10 shown
+
+nn[k].dist: distance in meters to k^th rearest reproductive Lilium whose flowers were not consumed by deer, k = 1-10
