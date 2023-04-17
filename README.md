@@ -35,7 +35,7 @@ For more theoretical background and real data analyses with aster:
 
 ## Log
 
-2023/4/17: update README
+2023/4/17: update README\
 2023/4/14: first commit
 
 
